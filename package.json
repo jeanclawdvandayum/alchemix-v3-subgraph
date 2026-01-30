@@ -1,0 +1,22 @@
+{
+  "name": "alchemix-v3-subgraph",
+  "version": "0.1.0",
+  "description": "Subgraph for Alchemix V3 - tracks all positions with enhanced looper support",
+  "repository": "https://github.com/alchemix-finance/alchemix-v3-subgraph",
+  "license": "MIT",
+  "scripts": {
+    "codegen": "graph codegen",
+    "build": "graph build",
+    "deploy": "graph deploy --node https://api.studio.thegraph.com/deploy/",
+    "deploy:hosted": "graph deploy --product hosted-service",
+    "create-local": "graph create --node http://localhost:8020/ alchemix-v3",
+    "remove-local": "graph remove --node http://localhost:8020/ alchemix-v3",
+    "deploy-local": "graph deploy --node http://localhost:8020/ --ipfs http://localhost:5001 alchemix-v3",
+    "test": "graph test"
+  },
+  "devDependencies": {
+    "@graphprotocol/graph-cli": "^0.71.0",
+    "@graphprotocol/graph-ts": "^0.32.0",
+    "matchstick-as": "^0.6.0"
+  }
+}

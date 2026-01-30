@@ -1,0 +1,86 @@
+specVersion: 1.0.0
+indexerHints:
+  prune: auto
+schema:
+  file: ./schema.graphql
+
+dataSources:
+  # =========================================================================
+  # AlchemistV3 - Main position tracking
+  # =========================================================================
+  - kind: ethereum
+    name: AlchemistV3
+    network: mainnet
+    source:
+      address: "0x0000000000000000000000000000000000000000" # TODO: Replace with deployed address
+      abi: AlchemistV3
+      startBlock: 0 # TODO: Set to deployment block
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.7
+      language: wasm/assemblyscript
+      entities:
+        - Position
+        - User
+        - Vault
+        - DepositEvent
+        - BorrowEvent
+        - RepayEvent
+        - WithdrawalEvent
+        - LiquidationEvent
+        - DailyPositionSnapshot
+        - ProtocolStats
+      abis:
+        - name: AlchemistV3
+          file: ./abis/AlchemistV3.json
+      eventHandlers:
+        - event: Deposit(indexed uint256,address,uint256,uint256)
+          handler: handleDeposit
+        - event: Withdraw(indexed uint256,address,uint256,uint256)
+          handler: handleWithdraw
+        - event: Mint(indexed uint256,address,uint256)
+          handler: handleMint
+        - event: Burn(indexed uint256,address,uint256)
+          handler: handleBurn
+        - event: Liquidate(indexed uint256,address,uint256,uint256)
+          handler: handleLiquidate
+        - event: Transfer(indexed address,indexed address,indexed uint256)
+          handler: handlePositionTransfer
+      file: ./src/alchemist.ts
+
+  # =========================================================================
+  # AlchemixLooper - Looped position tracking
+  # =========================================================================
+  - kind: ethereum
+    name: AlchemixLooper
+    network: mainnet
+    source:
+      address: "0x0000000000000000000000000000000000000000" # TODO: Replace with deployed address
+      abi: AlchemixLooper
+      startBlock: 0 # TODO: Set to deployment block
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.7
+      language: wasm/assemblyscript
+      entities:
+        - Position
+        - LooperPositionData
+        - LoopEvent
+        - DepositEvent
+        - BorrowEvent
+        - ProtocolStats
+      abis:
+        - name: AlchemixLooper
+          file: ./abis/AlchemixLooper.json
+        - name: AlchemistV3
+          file: ./abis/AlchemistV3.json
+      eventHandlers:
+        - event: LoopedPositionCreated(indexed uint256,indexed address,uint256,uint256,uint256,uint256,uint256,uint256)
+          handler: handleLoopedPositionCreated
+        - event: LoopExecuted(indexed uint256,indexed address,uint256,uint256,uint256)
+          handler: handleLoopExecuted
+        - event: MultiLoopExecuted(indexed uint256,indexed address,uint256,uint256,uint256,uint256)
+          handler: handleMultiLoopExecuted
+      file: ./src/looper.ts
+
+# templates: # For dynamic vault tracking if needed

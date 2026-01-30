@@ -1,0 +1,195 @@
+# =============================================================================
+# Alchemix V3 Subgraph Schema
+# General purpose position tracking with enhanced looper support
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Core Entities
+# -----------------------------------------------------------------------------
+
+type User @entity {
+  id: Bytes! # address
+  positions: [Position!]! @derivedFrom(field: "owner")
+  totalPositions: Int!
+  createdAt: BigInt!
+}
+
+type Position @entity {
+  id: ID! # tokenId
+  tokenId: BigInt!
+  owner: User!
+  vault: Vault!
+  
+  # Current state
+  collateral: BigInt!
+  debt: BigInt!
+  
+  # Timestamps
+  createdAt: BigInt!
+  updatedAt: BigInt!
+  
+  # Looper flags
+  isLoopedPosition: Boolean!
+  looperData: LooperPositionData
+  
+  # History
+  deposits: [DepositEvent!]! @derivedFrom(field: "position")
+  borrows: [BorrowEvent!]! @derivedFrom(field: "position")
+  repays: [RepayEvent!]! @derivedFrom(field: "position")
+  withdrawals: [WithdrawalEvent!]! @derivedFrom(field: "position")
+  liquidations: [LiquidationEvent!]! @derivedFrom(field: "position")
+  loopEvents: [LoopEvent!]! @derivedFrom(field: "position")
+}
+
+type Vault @entity {
+  id: Bytes! # vault address
+  alchemist: Bytes!
+  underlyingToken: Bytes!
+  yieldToken: Bytes!
+  positions: [Position!]! @derivedFrom(field: "vault")
+  totalCollateral: BigInt!
+  totalDebt: BigInt!
+}
+
+# -----------------------------------------------------------------------------
+# Looper-Specific Entities
+# -----------------------------------------------------------------------------
+
+type LooperPositionData @entity {
+  id: ID! # same as position tokenId
+  position: Position!
+  
+  # Initial state (at creation via looper)
+  initialDeposit: BigInt!          # USDC deposited by user
+  initialCollateral: BigInt!       # Collateral after all loops
+  initialDebt: BigInt!             # Debt after all loops
+  initialLeverage: BigDecimal!     # Calculated leverage at creation
+  
+  # Loop stats
+  totalLoops: Int!
+  totalMinted: BigInt!             # Total alUSD borrowed across loops
+  totalSwapped: BigInt!            # Total USDC received from swaps
+  averageSwapRate: BigDecimal!     # totalSwapped / totalMinted
+  
+  # Tracking
+  createdAt: BigInt!
+  createdTxHash: Bytes!
+  lastLoopAt: BigInt!
+  
+  # Derived metrics (updated on position changes)
+  currentMultiple: BigDecimal!     # currentCollateral / initialDeposit
+  peakMultiple: BigDecimal!
+  
+  # Loop history
+  loops: [LoopEvent!]! @derivedFrom(field: "looperData")
+}
+
+type LoopEvent @entity {
+  id: ID! # txHash-logIndex
+  position: Position!
+  looperData: LooperPositionData!
+  
+  loopNumber: Int!
+  borrowAmount: BigInt!            # alUSD minted
+  usdcReceived: BigInt!            # USDC from swap
+  sharesDeposited: BigInt!         # Vault shares added
+  
+  # State after this loop
+  collateralAfter: BigInt!
+  debtAfter: BigInt!
+  ltvAfter: BigDecimal!
+  
+  timestamp: BigInt!
+  txHash: Bytes!
+  blockNumber: BigInt!
+}
+
+# -----------------------------------------------------------------------------
+# General Position Events
+# -----------------------------------------------------------------------------
+
+type DepositEvent @entity {
+  id: ID! # txHash-logIndex
+  position: Position!
+  amount: BigInt!
+  shares: BigInt!
+  depositor: Bytes!
+  timestamp: BigInt!
+  txHash: Bytes!
+  blockNumber: BigInt!
+  
+  # Flag if this was part of a loop
+  isLoopDeposit: Boolean!
+}
+
+type BorrowEvent @entity {
+  id: ID! # txHash-logIndex
+  position: Position!
+  amount: BigInt!
+  recipient: Bytes!
+  timestamp: BigInt!
+  txHash: Bytes!
+  blockNumber: BigInt!
+  
+  # Flag if this was part of a loop
+  isLoopBorrow: Boolean!
+}
+
+type RepayEvent @entity {
+  id: ID! # txHash-logIndex
+  position: Position!
+  amount: BigInt!
+  payer: Bytes!
+  timestamp: BigInt!
+  txHash: Bytes!
+  blockNumber: BigInt!
+}
+
+type WithdrawalEvent @entity {
+  id: ID! # txHash-logIndex
+  position: Position!
+  shares: BigInt!
+  amount: BigInt!
+  recipient: Bytes!
+  timestamp: BigInt!
+  txHash: Bytes!
+  blockNumber: BigInt!
+}
+
+type LiquidationEvent @entity {
+  id: ID! # txHash-logIndex
+  position: Position!
+  collateralLiquidated: BigInt!
+  debtRepaid: BigInt!
+  liquidator: Bytes!
+  timestamp: BigInt!
+  txHash: Bytes!
+  blockNumber: BigInt!
+}
+
+# -----------------------------------------------------------------------------
+# Aggregates & Snapshots
+# -----------------------------------------------------------------------------
+
+type DailyPositionSnapshot @entity {
+  id: ID! # positionId-dayTimestamp
+  position: Position!
+  date: Int! # days since epoch
+  
+  collateral: BigInt!
+  debt: BigInt!
+  leverage: BigDecimal!
+  
+  # For looped positions
+  multiple: BigDecimal # currentCollateral / initialDeposit
+}
+
+type ProtocolStats @entity {
+  id: ID! # "protocol"
+  totalPositions: Int!
+  totalLoopedPositions: Int!
+  totalCollateral: BigInt!
+  totalDebt: BigInt!
+  totalLoopVolume: BigInt! # Total alUSD looped through
+  updatedAt: BigInt!
+}
