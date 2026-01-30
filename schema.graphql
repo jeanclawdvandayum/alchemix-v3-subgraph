@@ -61,6 +61,7 @@ type LooperPositionData @entity {
   
   # Initial state (at creation via looper)
   initialDeposit: BigInt!          # USDC deposited by user
+  preLoopShares: BigInt!           # Shares from initial deposit BEFORE loops
   initialCollateral: BigInt!       # Collateral after all loops
   initialDebt: BigInt!             # Debt after all loops
   initialLeverage: BigDecimal!     # Calculated leverage at creation

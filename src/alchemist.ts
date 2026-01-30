@@ -4,8 +4,9 @@ import {
   Withdraw,
   Mint,
   Burn,
-  Liquidate,
-  Transfer,
+  Repay,
+  Liquidated,
+  ForceRepay,
 } from "../generated/AlchemistV3/AlchemistV3";
 import {
   Position,
@@ -17,6 +18,7 @@ import {
   WithdrawalEvent,
   LiquidationEvent,
   DailyPositionSnapshot,
+  LooperPositionData,
 } from "../generated/schema";
 import {
   getOrCreateUser,
@@ -32,8 +34,9 @@ import {
 // Core Alchemist Event Handlers
 // =============================================================================
 
+// Deposit(uint256 amount, uint256 indexed recipientId)
 export function handleDeposit(event: Deposit): void {
-  let tokenId = event.params.tokenId;
+  let tokenId = event.params.recipientId;
   let position = getOrCreatePosition(tokenId, event.block.timestamp);
   
   // Create deposit event
@@ -41,33 +44,29 @@ export function handleDeposit(event: Deposit): void {
   let depositEvent = new DepositEvent(depositId);
   depositEvent.position = position.id;
   depositEvent.amount = event.params.amount;
-  depositEvent.shares = event.params.shares;
-  depositEvent.depositor = event.params.sender;
+  depositEvent.shares = event.params.amount; // Note: V3 may not emit shares separately
+  depositEvent.depositor = event.transaction.from;
   depositEvent.timestamp = event.block.timestamp;
   depositEvent.txHash = event.transaction.hash;
   depositEvent.blockNumber = event.block.number;
-  
-  // Check if this deposit is part of a loop (from looper contract)
-  // This would be determined by checking if msg.sender is the looper
-  // For now, default to false - looper.ts will handle loop deposits
   depositEvent.isLoopDeposit = false;
   depositEvent.save();
   
-  // Update position
-  position.collateral = position.collateral.plus(event.params.shares);
+  // Update position collateral
+  position.collateral = position.collateral.plus(event.params.amount);
   position.updatedAt = event.block.timestamp;
   position.save();
   
   // Update protocol stats
   let stats = getOrCreateProtocolStats();
-  stats.totalCollateral = stats.totalCollateral.plus(event.params.shares);
+  stats.totalCollateral = stats.totalCollateral.plus(event.params.amount);
   stats.updatedAt = event.block.timestamp;
   stats.save();
   
-  // Create daily snapshot
   createDailySnapshot(position, event.block.timestamp);
 }
 
+// Withdraw(uint256 amount, uint256 indexed tokenId, address recipient)
 export function handleWithdraw(event: Withdraw): void {
   let tokenId = event.params.tokenId;
   let position = Position.load(tokenId.toString());
@@ -78,7 +77,7 @@ export function handleWithdraw(event: Withdraw): void {
   let withdrawId = event.transaction.hash.toHexString() + "-" + event.logIndex.toString();
   let withdrawEvent = new WithdrawalEvent(withdrawId);
   withdrawEvent.position = position.id;
-  withdrawEvent.shares = event.params.shares;
+  withdrawEvent.shares = event.params.amount;
   withdrawEvent.amount = event.params.amount;
   withdrawEvent.recipient = event.params.recipient;
   withdrawEvent.timestamp = event.block.timestamp;
@@ -87,22 +86,21 @@ export function handleWithdraw(event: Withdraw): void {
   withdrawEvent.save();
   
   // Update position
-  position.collateral = position.collateral.minus(event.params.shares);
+  position.collateral = position.collateral.minus(event.params.amount);
   position.updatedAt = event.block.timestamp;
   position.save();
   
   // Update protocol stats
   let stats = getOrCreateProtocolStats();
-  stats.totalCollateral = stats.totalCollateral.minus(event.params.shares);
+  stats.totalCollateral = stats.totalCollateral.minus(event.params.amount);
   stats.updatedAt = event.block.timestamp;
   stats.save();
   
-  // Update looper multiple if applicable
   updateLooperMultiple(position);
-  
   createDailySnapshot(position, event.block.timestamp);
 }
 
+// Mint(uint256 indexed tokenId, uint256 amount, address recipient)
 export function handleMint(event: Mint): void {
   let tokenId = event.params.tokenId;
   let position = Position.load(tokenId.toString());
@@ -118,7 +116,7 @@ export function handleMint(event: Mint): void {
   borrowEvent.timestamp = event.block.timestamp;
   borrowEvent.txHash = event.transaction.hash;
   borrowEvent.blockNumber = event.block.number;
-  borrowEvent.isLoopBorrow = false; // Will be set by looper handler
+  borrowEvent.isLoopBorrow = false;
   borrowEvent.save();
   
   // Update position
@@ -135,13 +133,14 @@ export function handleMint(event: Mint): void {
   createDailySnapshot(position, event.block.timestamp);
 }
 
+// Burn(address indexed sender, uint256 amount, uint256 indexed recipientId)
 export function handleBurn(event: Burn): void {
-  let tokenId = event.params.tokenId;
+  let tokenId = event.params.recipientId;
   let position = Position.load(tokenId.toString());
   
   if (!position) return;
   
-  // Create repay event
+  // Create repay event (Burn = user burns alUSD to reduce debt)
   let repayId = event.transaction.hash.toHexString() + "-" + event.logIndex.toString();
   let repayEvent = new RepayEvent(repayId);
   repayEvent.position = position.id;
@@ -163,14 +162,46 @@ export function handleBurn(event: Burn): void {
   stats.updatedAt = event.block.timestamp;
   stats.save();
   
-  // Update looper multiple if applicable
   updateLooperMultiple(position);
-  
   createDailySnapshot(position, event.block.timestamp);
 }
 
-export function handleLiquidate(event: Liquidate): void {
-  let tokenId = event.params.tokenId;
+// Repay(address indexed sender, uint256 amount, uint256 indexed recipientId, uint256 actualAmount)
+export function handleRepay(event: Repay): void {
+  let tokenId = event.params.recipientId;
+  let position = Position.load(tokenId.toString());
+  
+  if (!position) return;
+  
+  // Create repay event
+  let repayId = event.transaction.hash.toHexString() + "-" + event.logIndex.toString();
+  let repayEvent = new RepayEvent(repayId);
+  repayEvent.position = position.id;
+  repayEvent.amount = event.params.actualAmount; // Use actualAmount for the effective repay
+  repayEvent.payer = event.params.sender;
+  repayEvent.timestamp = event.block.timestamp;
+  repayEvent.txHash = event.transaction.hash;
+  repayEvent.blockNumber = event.block.number;
+  repayEvent.save();
+  
+  // Update position debt
+  position.debt = position.debt.minus(event.params.actualAmount);
+  position.updatedAt = event.block.timestamp;
+  position.save();
+  
+  // Update protocol stats
+  let stats = getOrCreateProtocolStats();
+  stats.totalDebt = stats.totalDebt.minus(event.params.actualAmount);
+  stats.updatedAt = event.block.timestamp;
+  stats.save();
+  
+  updateLooperMultiple(position);
+  createDailySnapshot(position, event.block.timestamp);
+}
+
+// Liquidated(uint256 indexed accountId, address liquidator, uint256 amount, uint256 feeInYield, uint256 feeInUnderlying)
+export function handleLiquidated(event: Liquidated): void {
+  let tokenId = event.params.accountId;
   let position = Position.load(tokenId.toString());
   
   if (!position) return;
@@ -179,7 +210,7 @@ export function handleLiquidate(event: Liquidate): void {
   let liqId = event.transaction.hash.toHexString() + "-" + event.logIndex.toString();
   let liqEvent = new LiquidationEvent(liqId);
   liqEvent.position = position.id;
-  liqEvent.collateralLiquidated = event.params.shares;
+  liqEvent.collateralLiquidated = event.params.feeInYield.plus(event.params.feeInUnderlying);
   liqEvent.debtRepaid = event.params.amount;
   liqEvent.liquidator = event.params.liquidator;
   liqEvent.timestamp = event.block.timestamp;
@@ -188,84 +219,52 @@ export function handleLiquidate(event: Liquidate): void {
   liqEvent.save();
   
   // Update position
-  position.collateral = position.collateral.minus(event.params.shares);
+  let totalFees = event.params.feeInYield.plus(event.params.feeInUnderlying);
+  position.collateral = position.collateral.minus(totalFees);
   position.debt = position.debt.minus(event.params.amount);
   position.updatedAt = event.block.timestamp;
   position.save();
   
-  // Update looper multiple if applicable
   updateLooperMultiple(position);
-  
   createDailySnapshot(position, event.block.timestamp);
 }
 
-export function handlePositionTransfer(event: Transfer): void {
+// ForceRepay(uint256 indexed tokenId, uint256 amount, uint256 earmarked, uint256 newDebt)
+export function handleForceRepay(event: ForceRepay): void {
   let tokenId = event.params.tokenId;
   let position = Position.load(tokenId.toString());
   
-  // New position being minted
-  if (event.params.from.equals(Address.zero())) {
-    position = getOrCreatePosition(tokenId, event.block.timestamp);
-    
-    let user = getOrCreateUser(event.params.to, event.block.timestamp);
-    user.totalPositions = user.totalPositions + 1;
-    user.save();
-    
-    position.owner = user.id;
-    position.save();
-    
-    let stats = getOrCreateProtocolStats();
-    stats.totalPositions = stats.totalPositions + 1;
-    stats.updatedAt = event.block.timestamp;
-    stats.save();
-    
-    return;
-  }
+  if (!position) return;
   
-  // Position being burned
-  if (event.params.to.equals(Address.zero())) {
-    if (position) {
-      let oldOwner = User.load(position.owner);
-      if (oldOwner) {
-        oldOwner.totalPositions = oldOwner.totalPositions - 1;
-        oldOwner.save();
-      }
-    }
-    
-    let stats = getOrCreateProtocolStats();
-    stats.totalPositions = stats.totalPositions - 1;
-    if (position && position.isLoopedPosition) {
-      stats.totalLoopedPositions = stats.totalLoopedPositions - 1;
-    }
-    stats.updatedAt = event.block.timestamp;
-    stats.save();
-    
-    return;
-  }
+  // Create repay event for force repay
+  let repayId = event.transaction.hash.toHexString() + "-" + event.logIndex.toString();
+  let repayEvent = new RepayEvent(repayId);
+  repayEvent.position = position.id;
+  repayEvent.amount = event.params.amount;
+  repayEvent.payer = Address.zero(); // Force repay is system-initiated
+  repayEvent.timestamp = event.block.timestamp;
+  repayEvent.txHash = event.transaction.hash;
+  repayEvent.blockNumber = event.block.number;
+  repayEvent.save();
   
-  // Regular transfer
-  if (position) {
-    let oldOwner = User.load(position.owner);
-    if (oldOwner) {
-      oldOwner.totalPositions = oldOwner.totalPositions - 1;
-      oldOwner.save();
-    }
-    
-    let newOwner = getOrCreateUser(event.params.to, event.block.timestamp);
-    newOwner.totalPositions = newOwner.totalPositions + 1;
-    newOwner.save();
-    
-    position.owner = newOwner.id;
-    position.updatedAt = event.block.timestamp;
-    position.save();
-  }
+  // Update position with new debt value directly
+  position.debt = event.params.newDebt;
+  position.updatedAt = event.block.timestamp;
+  position.save();
+  
+  // Update protocol stats
+  let stats = getOrCreateProtocolStats();
+  stats.totalDebt = stats.totalDebt.minus(event.params.amount);
+  stats.updatedAt = event.block.timestamp;
+  stats.save();
+  
+  updateLooperMultiple(position);
+  createDailySnapshot(position, event.block.timestamp);
 }
 
 // =============================================================================
 // Helper Functions
 // =============================================================================
-
-import { LooperPositionData } from "../generated/schema";
 
 function updateLooperMultiple(position: Position): void {
   if (!position.isLoopedPosition) return;

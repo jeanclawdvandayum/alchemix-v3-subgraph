@@ -27,6 +27,7 @@ export function handleLoopedPositionCreated(event: LoopedPositionCreated): void 
   let looperData = new LooperPositionData(tokenId.toString());
   looperData.position = position.id;
   looperData.initialDeposit = event.params.initialUsdc;
+  looperData.preLoopShares = event.params.initialShares;
   looperData.initialCollateral = event.params.finalShares;
   looperData.initialDebt = event.params.totalBorrowed;
   
@@ -90,6 +91,7 @@ export function handleLoopExecuted(event: LoopExecuted): void {
     looperData = new LooperPositionData(tokenId.toString());
     looperData.position = position.id;
     looperData.initialDeposit = position.collateral; // Best estimate
+    looperData.preLoopShares = position.collateral;  // Best estimate
     looperData.initialCollateral = position.collateral;
     looperData.initialDebt = position.debt;
     looperData.initialLeverage = BD_ZERO;

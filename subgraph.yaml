@@ -34,18 +34,20 @@ dataSources:
         - name: AlchemistV3
           file: ./abis/AlchemistV3.json
       eventHandlers:
-        - event: Deposit(indexed uint256,address,uint256,uint256)
+        - event: Deposit(uint256,indexed uint256)
           handler: handleDeposit
-        - event: Withdraw(indexed uint256,address,uint256,uint256)
+        - event: Withdraw(uint256,indexed uint256,address)
           handler: handleWithdraw
-        - event: Mint(indexed uint256,address,uint256)
+        - event: Mint(indexed uint256,uint256,address)
           handler: handleMint
-        - event: Burn(indexed uint256,address,uint256)
+        - event: Burn(indexed address,uint256,indexed uint256)
           handler: handleBurn
-        - event: Liquidate(indexed uint256,address,uint256,uint256)
-          handler: handleLiquidate
-        - event: Transfer(indexed address,indexed address,indexed uint256)
-          handler: handlePositionTransfer
+        - event: Repay(indexed address,uint256,indexed uint256,uint256)
+          handler: handleRepay
+        - event: Liquidated(indexed uint256,address,uint256,uint256,uint256)
+          handler: handleLiquidated
+        - event: ForceRepay(indexed uint256,uint256,uint256,uint256)
+          handler: handleForceRepay
       file: ./src/alchemist.ts
 
   # =========================================================================
